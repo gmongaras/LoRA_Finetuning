@@ -455,14 +455,14 @@ class GPT2Attention(nn.Module):
             query, key, value = self.c_attn(hidden_states).split(self.split_size, dim=2)
 
         # Project the normal keys, queries, and values using the C matrix
-        query = torch.bmm(query, self.Q_C)
-        key = torch.bmm(key, self.K_C)
-        value = torch.bmm(value, self.V_C)
+        query = query@self.Q_C
+        key = key@self.K_C
+        value = value@self.V_C
 
         # LoRA keys, queries, and values
-        query_LoRA = torch.bmm(torch.bmm(hidden_states, self.Q_A), self.Q_B)
-        key_LoRA = torch.bmm(torch.bmm(hidden_states, self.K_A), self.K_B)
-        value_LoRA = torch.bmm(torch.bmm(hidden_states, self.V_A), self.V_B)
+        query_LoRA = (hidden_states@self.Q_A)@self.Q_B
+        key_LoRA = (hidden_states@self.K_A)@self.K_B
+        value_LoRA = (hidden_states@self.V_A)@self.V_B
 
         # Combine the LoRA and normal queries, keys, and values
         query = query + query_LoRA
@@ -493,11 +493,11 @@ class GPT2Attention(nn.Module):
         attn_output = self._merge_heads(attn_output, self.num_heads, self.head_dim)
 
         # Get the attention output for LoRA
-        attn_output_LoRA = torch.bmm(torch.bmm(attn_output, self.W_A), self.W_B)
+        attn_output_LoRA = (attn_output@self.W_A)@self.W_B
 
         # Project the attention output back to the original size using the C matrix
         # and previously learned weights
-        attn_output = self.c_proj(torch.bmm(attn_output, self.W_C))
+        attn_output = self.c_proj(attn_output@self.W_C)
 
         # Combine the attention outputs
         attn_output = attn_output + attn_output_LoRA
@@ -627,7 +627,7 @@ class GPT2_config_LoRA():
         vocab_size=50257,
         n_positions=1024,
         hidden_size=768,
-        hidden_size_scale=0.5,
+        hidden_size_scale=0.125,
         r=1,
         n_layer=12,
         n_head=12,
@@ -677,3 +677,8 @@ class GPT2_config_LoRA():
         self.scale_attn_by_inverse_layer_idx = scale_attn_by_inverse_layer_idx
         self.reorder_and_upcast_attn = reorder_and_upcast_attn
         self.add_cross_attention = add_cross_attention
+
+
+
+        assert (hidden_size*hidden_size_scale)%1 == 0,\
+            "hidden_size_scale cannot result in a fractional hidden size"

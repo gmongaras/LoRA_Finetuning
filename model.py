@@ -7,166 +7,6 @@ from GPT2_LoRA import GPT2Block_LoRA, GPT2_config_LoRA
 
 
 
-# class Attention_LoRA(nn.Module):
-#     def __init__(self, d_model, n_heads, d_tilde_model, r=1):
-#         super(Attention_LoRA, self).__init__()
-
-#         self.d_model = d_model
-#         self.n_heads = n_heads
-
-#         # Normal old attention layers
-#         self.Q_weight = nn.Linear(d_model, d_model, bias=True)
-#         self.K_weight = nn.Linear(d_model, d_model, bias=True)
-#         self.V_weight = nn.Linear(d_model, d_model, bias=True)
-#         self.W_weight = nn.Linear(d_model, d_model, bias=True)
-
-#         # A, B, and C matrices for each attention layer.
-#         # A and C are initialized normally, and B is initialized to zero.
-#         self.Q_A = nn.Parameter(torch.randn(1, d_model, r))
-#         self.Q_B = nn.Parameter(torch.zeros(1, r, d_tilde_model))
-#         self.Q_C = nn.Parameter(torch.randn(1, d_model, d_tilde_model))
-#         self.K_A = nn.Parameter(torch.randn(1, d_model, r))
-#         self.K_B = nn.Parameter(torch.zeros(1, r, d_tilde_model))
-#         self.K_C = nn.Parameter(torch.randn(1, d_model, d_tilde_model))
-#         self.V_A = nn.Parameter(torch.randn(1, d_model, r))
-#         self.V_B = nn.Parameter(torch.zeros(1, r, d_tilde_model))
-#         self.V_C = nn.Parameter(torch.randn(1, d_model, d_tilde_model))
-#         self.W_A = nn.Parameter(torch.randn(1, d_tilde_model, r))
-#         self.W_B = nn.Parameter(torch.zeros(1, r, d_model))
-#         self.W_C = nn.Parameter(torch.randn(1, d_tilde_model, d_model))
-    
-#     def forward(self, X, attn_mask=None):
-#         # # Left side, normal QKV, compressed to d_ilde using the C matrix
-#         # Q = torch.bmm(self.Q_weight(X), self.Q_C)
-#         # K = torch.bmm(self.K_weight(X), self.K_C)
-#         # V = torch.bmm(self.V_weight(X), self.V_C)
-
-#         # # Right side, LoRA QKV
-#         # Q_tilde = torch.bmm(torch.bmm(X, self.Q_A), self.Q_B)
-#         # K_tilde = torch.bmm(torch.bmm(X, self.K_A), self.K_B)
-#         # V_tilde = torch.bmm(torch.bmm(X, self.V_A), self.V_B)
-
-#         # # Add the left and right sides of the QKV together
-#         # Q = Q + Q_tilde
-#         # K = K + K_tilde
-#         # V = V + V_tilde
-
-#         Q = self.Q_weight(X)
-#         K = self.K_weight(X)
-#         V = self.V_weight(X)
-
-#         # Split the QKV into heads
-#         Q = Q.view(-1, self.n_heads, self.d_model // self.n_heads)
-#         K = K.view(-1, self.n_heads, self.d_model // self.n_heads)
-#         V = V.view(-1, self.n_heads, self.d_model // self.n_heads)
-
-#         Q = Q.transpose(0, 1)
-#         K = K.transpose(0, 1)
-#         V = V.transpose(0, 1)
-
-#         # Compute the attention scores
-#         scores = torch.bmm(Q, K.transpose(1, 2)) / (self.d_model // self.n_heads) ** 0.5
-#         if attn_mask is not None:
-#             scores = scores + attn_mask*1e-10
-#         scores = scores.softmax(dim=-1)
-
-#         # Compute the attention output
-#         out = torch.bmm(scores, V)
-#         out = out.transpose(0, 1).contiguous().view(X.shape[0], -1, self.d_model)
-
-
-#         # # Multiply by the output weight matrix normally, then compress to d_tilde
-#         # out = self.W_weight(torch.bmm(out, self.W_C))
-
-#         # # Multiply by the output weight matrix using the C matrix
-#         # out_tilde = torch.bmm(torch.bmm(out, self.W_A), self.W_B)
-
-#         # # Add the outputs together to get the final output
-#         # out = out + out_tilde
-
-#         # Multiply by the output weight matrix normally, then compress to d_tilde
-#         out = self.W_weight(out)
-
-#         return out
-    
-
-
-
-# class Transformer_LoRA(nn.Module):
-#     def __init__(self, d_model, d_proj, n_heads, d_tilde_model, r=1):
-#         super(Transformer_LoRA, self).__init__()
-
-#         # Normal old transformer layers
-#         self.attn = Attention_LoRA(d_model, n_heads, d_tilde_model, r)
-#         self.ln_1 = nn.LayerNorm(d_model)
-#         self.mlp = nn.Sequential(
-#             nn.Linear(d_model, d_proj),
-#             nn.GELU(),
-#             nn.Linear(d_proj, d_model)
-#         )
-#         self.ln_2 = nn.LayerNorm(d_model)
-
-#     def forward(self, X, attn_mask=None):
-#         res = X.clone()
-#         out = self.ln_1(X)
-#         out = self.attn(out, attn_mask)
-#         out = out + res
-#         res = out.clone()
-#         out = self.ln_2(out)
-#         out = self.mlp(out)
-
-#         return out + res
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 class Model(nn.Module):
     # tokenizer: HuggingFace tokenizer to tokenize the input text
@@ -305,10 +145,10 @@ if __name__ == "__main__":
             d_model = Q_weight.shape[1]
 
             # Create a new GPT3 layer
-            # config = GPT2_config_LoRA()
-            # blk = GPT2Block_LoRA(config, i)
-            config = GPT2_config()
-            blk = GPT2Block(config, i)
+            config = GPT2_config_LoRA()
+            blk = GPT2Block_LoRA(config, i)
+            # config = GPT2_config()
+            # blk = GPT2Block(config, i)
 
             # Copy the weights from the original model to the new layer
             blk.attn.c_attn.weight.data = attn_weight
@@ -335,10 +175,8 @@ if __name__ == "__main__":
 
 
 
-    norm_layers = list(model.transformer.h)
     model = Model(tokenizer, token_embeddings, position_embeddings, layers, head, n_heads, d_tilde_scale, r)
     model = model.eval()
-    model.norm_layers = norm_layers
 
     # Prompts for the model
     prompts = [
