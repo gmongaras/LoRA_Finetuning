@@ -96,7 +96,7 @@ def create_model():
 
 
 
-    model = Model(tokenizer, token_embeddings, position_embeddings, layers, head, n_heads, d_tilde_scale, r)
+    model = Model(config, tokenizer, token_embeddings, position_embeddings, layers, head, n_heads, d_tilde_scale, r)
     model = model.eval()
 
     return model

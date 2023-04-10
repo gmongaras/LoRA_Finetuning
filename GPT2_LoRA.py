@@ -7,6 +7,7 @@ from typing import List, Optional, Set, Tuple, Union
 
 from torch.cuda.amp import autocast
 from activations import ACT2FN
+import json
 
 
 
@@ -285,16 +286,16 @@ class GPT2Attention(nn.Module):
         d_tilde_model = int(config.hidden_size * config.hidden_size_scale)
         self.Q_A = nn.Parameter(torch.randn(1, config.hidden_size, config.r))
         self.Q_B = nn.Parameter(torch.zeros(1, config.r, d_tilde_model))
-        self.Q_C = nn.Parameter(torch.randn(1, config.hidden_size, d_tilde_model))
+        self.Q_C = nn.Parameter(torch.randn(1, config.hidden_size, d_tilde_model)*(config.hidden_size_scale**2))
         self.K_A = nn.Parameter(torch.randn(1, config.hidden_size, config.r))
         self.K_B = nn.Parameter(torch.zeros(1, config.r, d_tilde_model))
-        self.K_C = nn.Parameter(torch.randn(1, config.hidden_size, d_tilde_model))
+        self.K_C = nn.Parameter(torch.randn(1, config.hidden_size, d_tilde_model)*(config.hidden_size_scale**2))
         self.V_A = nn.Parameter(torch.randn(1, config.hidden_size, config.r))
         self.V_B = nn.Parameter(torch.zeros(1, config.r, d_tilde_model))
-        self.V_C = nn.Parameter(torch.randn(1, config.hidden_size, d_tilde_model))
+        self.V_C = nn.Parameter(torch.randn(1, config.hidden_size, d_tilde_model)*(config.hidden_size_scale**2))
         self.W_A = nn.Parameter(torch.randn(1, d_tilde_model, config.r))
         self.W_B = nn.Parameter(torch.zeros(1, config.r, config.hidden_size))
-        self.W_C = nn.Parameter(torch.randn(1, d_tilde_model, config.hidden_size))
+        self.W_C = nn.Parameter(torch.randn(1, d_tilde_model, config.hidden_size)*(config.hidden_size_scale**2))
 
 
 

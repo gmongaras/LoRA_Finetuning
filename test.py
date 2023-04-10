@@ -25,9 +25,9 @@ def test():
     ]
 
     # Iterate to get 10 outputs
-    for output in range(0, 100):
+    for output in range(0, 10):
         # Get the next output form the model
-        output = Model(prompts)
+        output = Model.forward_pred(prompts)
 
         # Get the next output tokens
         output_tokens = torch.argmax(output, dim=-1)

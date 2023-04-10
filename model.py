@@ -17,10 +17,13 @@ class Model(nn.Module):
     # n_heads: number of heads in the transformer layers
     # d_tilde_scale: factor to scale the attention in the transformer layers (should be < 1)
     # r: Middle embedding dimension for the LoRA layers
-    def __init__(self, tokenizer, token_embeddings, position_embeddings, layers, head, n_heads, d_tilde_scale=0.5, r=1):
+    def __init__(self, config, tokenizer, token_embeddings, position_embeddings, layers, head, n_heads, d_tilde_scale=0.5, r=1):
         super(Model, self).__init__()
 
         # Store the model information
+        self.config_file = config
+        if tokenizer.pad_token == None:
+            tokenizer.pad_token = tokenizer.eos_token
         self.tokenizer = tokenizer
         self.token_embeddings = token_embeddings
         self.position_embeddings = position_embeddings
@@ -30,8 +33,51 @@ class Model(nn.Module):
         # The padding token will be at the end of the vocab
         self.pad_token_id = tokenizer.vocab_size - 1
 
+
+    def forward(self, input_ids, attention_mask=None, labels=None):
+        # # Encode the text into a tensor of token indices
+        # text = []
+        # max_len = 0
+        # for x in input_ids:
+        #     t = self.tokenizer.encode(x, return_tensors='pt')[0]
+        #     text.append(t)
+        #     max_len = max(max_len, t.shape[0])
+
+        # # Pad the text to the longest length
+        # for i in range(len(text)):
+        #     text[i] = torch.cat((text[i], torch.full((max_len - text[i].shape[0],), self.pad_token_id).long()), dim=0)
+
+        # # Stack the text tensors
+        # X = torch.stack(text, dim=0)
+
+        # Get a padding mask to mask any padding that was added
+        if attention_mask:
+            padding_mask = attention_mask
+            # padding_mask = X == self.pad_token_id
+            padding_mask = padding_mask.unsqueeze(1).unsqueeze(2)
+            padding_mask = padding_mask.repeat(1, 1, input_ids.shape[1], 1)
+            # padding_mask = padding_mask.float() * -1e10
+        else:
+            padding_mask = None
+
+        # Embed the tokens and add positional encodings
+        X = self.token_embeddings(input_ids)
+        X += self.position_embeddings(torch.arange(0, X.shape[1], device=X.device).unsqueeze(0).long())
+
+        # Put the embeddings through the transformer stack
+        for layer in self.layers:
+            if type(layer) != nn.LayerNorm:
+                X = layer(X, attention_mask=padding_mask)[0]
+            else:
+                X = layer(X)
+
+        # Get the output logits
+        X = self.head(X)
+
+        return X
+
     
-    def forward(self, X):
+    def forward_pred(self, X):
         # Encode the text into a tensor of token indices
         text = []
         max_len = 0
