@@ -9,7 +9,7 @@ from accelerate import Accelerator
 from torch.optim import AdamW
 from torch import nn
 from tqdm import tqdm
-
+import os
 
 
 
@@ -54,10 +54,10 @@ def finetune():
     data = "/n".join(data)
 
     # Write the data to files    
-    with open("data/1.txt", "w", encoding='utf-8') as f:
-        f.write(data[:100000000])
-    with open("data/2.txt", "w", encoding='utf-8') as f:
-        f.write(data[1000000000:1500000000])
+    # with open("data/1.txt", "w", encoding='utf-8') as f:
+    #     f.write(data[:100000000])
+    # with open("data/2.txt", "w", encoding='utf-8') as f:
+    #     f.write(data[:100000])
 
 
 
@@ -90,7 +90,7 @@ def finetune():
     # Load in the train/test data
     tokenized_data.set_format("torch")
     train_dataloader = DataLoader(tokenized_data["train"], batch_size=6, shuffle=True)
-    eval_dataloader = DataLoader(tokenized_data["test"], batch_size=4)
+    eval_dataloader = DataLoader(tokenized_data["test"], batch_size=6)
 
     # List of paramters not counting the W pre-trained paramters
     parameters = [p for n, p in Model.named_parameters() if "_A" in n or "_B" in n or "_C" in n]
@@ -106,13 +106,13 @@ def finetune():
 
 
     # Some training params
-    gradient_accumulation_steps = 1
+    gradient_accumulation_steps = 2
     eval_steps = 100
-    num_train_epochs = 10
+    num_train_epochs = 1
     num_update_steps_per_epoch = len(train_dataloader)
     num_training_steps = num_train_epochs * num_update_steps_per_epoch
     samples_per_step = 1
-    output_dir = "outputs/"
+    output_dir = "models/"
 
     def loss_funct(inputs, logits):
         # Shift so that tokens < n predict n
@@ -123,15 +123,19 @@ def finetune():
         loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
         return loss
     
-    def evaluate():
+    def evaluate(Model, accelerator, eval_dataloader):
+        # Put the model in eval mode
         Model.eval()
         losses = []
-        for step, batch in enumerate(eval_dataloader):
+        for step, batch in enumerate(eval_dataloader, start=1):
             with torch.no_grad():
                 outputs = Model(batch["input_ids"], labels=batch["input_ids"])
 
-            losses.append(accelerator.gather(outputs.loss))
-        loss = torch.mean(torch.cat(losses))
+            # Get CCE loss
+            loss = loss_funct(batch["input_ids"], outputs)
+
+            losses.append(accelerator.gather(loss))
+        loss = torch.stack(losses).mean()
         try:
             perplexity = torch.exp(loss)
         except OverflowError:
@@ -177,16 +181,24 @@ def finetune():
                 completed_steps += 1
 
             # Every so often, evaluate the model
-            if (completed_steps % (eval_steps * gradient_accumulation_steps)) == 0:
-                tqdm.write(str(round(loss.detach().cpu().item(), 4)))
-                # eval_loss, perplexity = evaluate()
-                # accelerator.print({"loss/eval": eval_loss, "perplexity": perplexity})
-                # Model.train()
-                # accelerator.wait_for_everyone()
-                # unwrapped_model = accelerator.unwrap_model(Model)
-                # unwrapped_model.save_pretrained(output_dir, save_function=accelerator.save)
-                # if accelerator.is_main_process:
-                #     Model.tokenizer.save_pretrained(output_dir)
+            if (completed_steps % eval_steps) == 0:
+                # tqdm.write(str(round(loss.detach().cpu().item(), 4)))
+                # Evaluate the model
+                eval_loss, perplexity = evaluate(Model, accelerator, eval_dataloader)
+                accelerator.print({"loss/eval": eval_loss, "perplexity": perplexity})
+
+                # Put the model back in train mode and get it
+                Model.train()
+                accelerator.wait_for_everyone()
+                unwrapped_model = accelerator.unwrap_model(Model)
+
+                # Save the model
+                if accelerator.is_main_process:
+                    if not os.path.exists(output_dir):
+                        os.makedirs(output_dir)
+                    torch.save(unwrapped_model.state_dict(), os.path.join(output_dir, f"model_{completed_steps}.pt"))
+                    torch.save(optimizer.state_dict(), os.path.join(output_dir, f"optimizer_{completed_steps}.pt"))
+                    unwrapped_model.tokenizer.save_pretrained(output_dir)
 
 
 
