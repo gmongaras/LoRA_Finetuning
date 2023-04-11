@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedModel
 from GPT2 import GPT2Block, GPT2_config
 from GPT2_LoRA import GPT2Block_LoRA, GPT2_config_LoRA
 
@@ -8,7 +8,7 @@ from GPT2_LoRA import GPT2Block_LoRA, GPT2_config_LoRA
 
 
 
-class Model(nn.Module):
+class Model(PreTrainedModel):
     # tokenizer: HuggingFace tokenizer to tokenize the input text
     # token_embeddings: nn.Embedding layer to embed tokens from vocab index to embedding vector
     # position_embeddings: nn.Embedding layer to embed positions
@@ -18,7 +18,7 @@ class Model(nn.Module):
     # d_tilde_scale: factor to scale the attention in the transformer layers (should be < 1)
     # r: Middle embedding dimension for the LoRA layers
     def __init__(self, config, tokenizer, token_embeddings, position_embeddings, layers, head, n_heads, d_tilde_scale=0.5, r=1):
-        super(Model, self).__init__()
+        super(Model, self).__init__(config)
 
         # Store the model information
         self.config_file = config
@@ -96,15 +96,15 @@ class Model(nn.Module):
         # Get a padding mask to mask any padding that was added
         padding_mask = X == self.pad_token_id
         padding_mask = padding_mask.unsqueeze(1).unsqueeze(2)
-        padding_mask = padding_mask.repeat(1, 1, X.shape[1], 1)
+        padding_mask = padding_mask.repeat(1, 1, X.shape[1], 1).to(self.device)
         padding_mask = padding_mask.float() * -1e10
 
         # Embed the tokens and add positional encodings
-        X = self.token_embeddings(X)
-        X += self.position_embeddings(torch.arange(0, X.shape[1]).unsqueeze(0).long())
+        X = self.token_embeddings(X.to(self.device))
+        X += self.position_embeddings(torch.arange(0, X.shape[1], device=self.device).unsqueeze(0).long())
 
         # Put the embeddings through the transformer stack
-        for layer in self.layers:
+        for layer in self.layers.to(self.device):
             if type(layer) != nn.LayerNorm:
                 X = layer(X, attention_mask=padding_mask)[0]
             else:
@@ -120,7 +120,7 @@ class Model(nn.Module):
         # Get the logits for the output token for each batchitem
         output = torch.stack([X[i, lengths[i], :] for i in range(X.shape[0])], dim=0)
 
-        return output
+        return output.detach().cpu()
 
 
 

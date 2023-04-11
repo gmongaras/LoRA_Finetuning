@@ -7,6 +7,7 @@ from typing import List, Optional, Set, Tuple, Union
 
 from torch.cuda.amp import autocast
 from activations import ACT2FN
+import json
 
 
 
@@ -248,18 +249,13 @@ class GPT2Attention(nn.Module):
 
         self.embed_dim = config.hidden_size
         self.num_heads = config.num_attention_heads
-
         self.head_dim = self.embed_dim // self.num_heads
-
         self.split_size = self.embed_dim
         if self.head_dim * self.num_heads != self.embed_dim:
             raise ValueError(
                 f"`embed_dim` must be divisible by num_heads (got `embed_dim`: {self.embed_dim} and `num_heads`:"
                 f" {self.num_heads})."
             )
-        
-        # The head dimension is also scaled by the hidden size scale.
-        self.head_dim = int(self.head_dim * config.hidden_size_scale)
 
         self.scale_attn_weights = config.scale_attn_weights
         self.is_cross_attention = is_cross_attention
@@ -281,6 +277,35 @@ class GPT2Attention(nn.Module):
 
         self.pruned_heads = set()
 
+
+
+
+
+        # A, B, and C matrices for each attention layer.
+        # A and C are initialized normally, and B is initialized to zero.
+        d_tilde_model = int(config.hidden_size * config.hidden_size_scale)
+        self.Q_A = nn.Parameter(torch.randn(1, config.hidden_size, config.r))
+        self.Q_B = nn.Parameter(torch.zeros(1, config.r, d_tilde_model))
+        self.Q_C = nn.Parameter(torch.randn(1, config.hidden_size, d_tilde_model)*(config.hidden_size_scale**2))
+        self.K_A = nn.Parameter(torch.randn(1, config.hidden_size, config.r))
+        self.K_B = nn.Parameter(torch.zeros(1, config.r, d_tilde_model))
+        self.K_C = nn.Parameter(torch.randn(1, config.hidden_size, d_tilde_model)*(config.hidden_size_scale**2))
+        self.V_A = nn.Parameter(torch.randn(1, config.hidden_size, config.r))
+        self.V_B = nn.Parameter(torch.zeros(1, config.r, d_tilde_model))
+        self.V_C = nn.Parameter(torch.randn(1, config.hidden_size, d_tilde_model)*(config.hidden_size_scale**2))
+        self.W_A = nn.Parameter(torch.randn(1, d_tilde_model, config.r))
+        self.W_B = nn.Parameter(torch.zeros(1, config.r, config.hidden_size))
+        self.W_C = nn.Parameter(torch.randn(1, d_tilde_model, config.hidden_size)*(config.hidden_size_scale**2))
+
+
+
+        # The head dimension is also scaled by the hidden size scale.
+        self.head_dim = int(self.head_dim * config.hidden_size_scale)
+
+
+
+
+
     def prune_heads(self, heads):
         if len(heads) == 0:
             return
@@ -297,6 +322,7 @@ class GPT2Attention(nn.Module):
         self.pruned_heads = self.pruned_heads.union(heads)
 
     def _attn(self, query, key, value, attention_mask=None, head_mask=None):
+        # Compue the attention scores between the keys and the queries
         attn_weights = torch.matmul(query, key.transpose(-1, -2))
 
         if self.scale_attn_weights:
@@ -415,6 +441,7 @@ class GPT2Attention(nn.Module):
         use_cache: Optional[bool] = False,
         output_attentions: Optional[bool] = False,
     ) -> Tuple[Union[torch.Tensor, Tuple[torch.Tensor]], ...]:
+        # Compute the queries, keys, and values
         if encoder_hidden_states is not None:
             if not hasattr(self, "q_attn"):
                 raise ValueError(
@@ -426,8 +453,24 @@ class GPT2Attention(nn.Module):
             key, value = self.c_attn(encoder_hidden_states).split(self.split_size, dim=2)
             attention_mask = encoder_attention_mask
         else:
-            query, key, value = self.c_attn(hidden_states).chunk(3, dim=2)
+            query, key, value = self.c_attn(hidden_states).split(self.split_size, dim=2)
 
+        # Project the normal keys, queries, and values using the C matrix
+        query = query@self.Q_C
+        key = key@self.K_C
+        value = value@self.V_C
+
+        # LoRA keys, queries, and values
+        query_LoRA = (hidden_states@self.Q_A)@self.Q_B
+        key_LoRA = (hidden_states@self.K_A)@self.K_B
+        value_LoRA = (hidden_states@self.V_A)@self.V_B
+
+        # Combine the LoRA and normal queries, keys, and values
+        query = query + query_LoRA
+        key = key + key_LoRA
+        value = value + value_LoRA
+
+        # Split the keys, queries, and values into multiple heads
         query = self._split_heads(query, self.num_heads, self.head_dim)
         key = self._split_heads(key, self.num_heads, self.head_dim)
         value = self._split_heads(value, self.num_heads, self.head_dim)
@@ -447,8 +490,18 @@ class GPT2Attention(nn.Module):
         else:
             attn_output, attn_weights = self._attn(query, key, value, attention_mask, head_mask)
 
+        # Merge the heads
         attn_output = self._merge_heads(attn_output, self.num_heads, self.head_dim)
-        attn_output = self.c_proj(attn_output)
+
+        # Get the attention output for LoRA
+        attn_output_LoRA = (attn_output@self.W_A)@self.W_B
+
+        # Project the attention output back to the original size using the C matrix
+        # and previously learned weights
+        attn_output = self.c_proj(attn_output@self.W_C)
+
+        # Combine the attention outputs
+        attn_output = attn_output + attn_output_LoRA
         attn_output = self.resid_dropout(attn_output)
 
         outputs = (attn_output, present)
@@ -475,7 +528,7 @@ class GPT2MLP(nn.Module):
         return hidden_states
 
 
-class GPT2Block(nn.Module):
+class GPT2Block_LoRA(nn.Module):
     def __init__(self, config, layer_idx=None):
         super().__init__()
         hidden_size = config.hidden_size
@@ -570,11 +623,13 @@ class GPT2Block(nn.Module):
 
 
 
-class GPT2_config():
+class GPT2_config_LoRA():
     def __init__(self,
         vocab_size=50257,
         n_positions=1024,
-        n_embd=768,
+        hidden_size=768,
+        hidden_size_scale=0.125,
+        r=1,
         n_layer=12,
         n_head=12,
         n_inner=None,
@@ -599,7 +654,9 @@ class GPT2_config():
     ):
         self.vocab_size = vocab_size
         self.max_position_embeddings = n_positions
-        self.hidden_size = n_embd
+        self.hidden_size = hidden_size
+        self.hidden_size_scale = hidden_size_scale
+        self.r = r
         self.num_hidden_layers = n_layer
         self.num_attention_heads = n_head
         self.n_inner = n_inner
@@ -621,3 +678,8 @@ class GPT2_config():
         self.scale_attn_by_inverse_layer_idx = scale_attn_by_inverse_layer_idx
         self.reorder_and_upcast_attn = reorder_and_upcast_attn
         self.add_cross_attention = add_cross_attention
+
+
+
+        assert (hidden_size*hidden_size_scale)%1 == 0,\
+            "hidden_size_scale cannot result in a fractional hidden size"

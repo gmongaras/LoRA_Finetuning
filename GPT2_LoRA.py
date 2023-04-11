@@ -8,6 +8,7 @@ from typing import List, Optional, Set, Tuple, Union
 from torch.cuda.amp import autocast
 from activations import ACT2FN
 import json
+from transformers import GPT2Config
 
 
 
@@ -623,7 +624,7 @@ class GPT2Block_LoRA(nn.Module):
 
 
 
-class GPT2_config_LoRA():
+class GPT2_config_LoRA(GPT2Config):
     def __init__(self,
         vocab_size=50257,
         n_positions=1024,

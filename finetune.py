@@ -1,6 +1,5 @@
 import torch
 from create_model import create_model
-import lzma
 
 from transformers import Trainer, TrainingArguments, TextDataset, DataCollatorForLanguageModeling
 from datasets import load_dataset, DatasetDict
@@ -38,34 +37,13 @@ def finetune():
     # Create the model form GPT-2
     Model = create_model().train().cuda()
 
-    # Load in the data
-    data = []
-    with lzma.open('data/1.xz', mode='rt', encoding='utf-8') as f:
-        # Read in all the lines from the file
-        lines = f.readlines()
-
-        # Remove any newlines
-        lines = [line.replace("\n", "").replace("\x00", "") for line in lines]
-        lines = [line for line in lines if len(line) > 0]
-
-        data += lines
-
-    # Join all the data together
-    data = "/n".join(data)
-
-    # Write the data to files    
-    # with open("data/1.txt", "w", encoding='utf-8') as f:
-    #     f.write(data[:100000000])
-    # with open("data/2.txt", "w", encoding='utf-8') as f:
-    #     f.write(data[:100000])
-
 
 
 
 
 
     # Load the data
-    data = load_dataset("text", data_files={"train": ["data/1.txt"], "test": "data/2.txt"}, sample_by="document")
+    data = load_dataset("text", data_files={"train": ["data/train.txt"], "test": "data/eval.txt"}, sample_by="document")
 
     # Tokenize a subset of the text
     tokenized_data = data.map(
@@ -107,8 +85,8 @@ def finetune():
 
     # Some training params
     gradient_accumulation_steps = 2
-    eval_steps = 100
-    num_train_epochs = 1
+    eval_steps = 1000
+    num_train_epochs = 3
     num_update_steps_per_epoch = len(train_dataloader)
     num_training_steps = num_train_epochs * num_update_steps_per_epoch
     samples_per_step = 1
